@@ -1,0 +1,20 @@
+# =============================================================================
+# Mẫu ~/.ssh/config trên MÁY CÁ NHÂN (Windows, Git Bash)
+# Thêm đoạn này vào cuối file ~/.ssh/config, sau đó chạy: chmod 600 ~/.ssh/config
+# Từ đó kết nối bằng lệnh ngắn:  ssh ptit-halo
+# (tương đương: ssh -p 2222 -i ~/.ssh/id_ed25519_ptit_s02 devops@103.116.104.228)
+# =============================================================================
+
+Host ptit-halo
+    HostName 103.116.104.228
+    Port 2222
+    User devops
+    IdentityFile ~/.ssh/id_ed25519_ptit_s02
+    # Chỉ dùng đúng khóa đã khai báo, không thử các khóa khác trong ssh-agent
+    IdentitiesOnly yes
+    # Giữ kết nối khi mạng im lặng lâu (60 giây gửi một gói keep-alive)
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+
+# Kiểm tra cấu hình được nạp đúng:
+#   ssh -G ptit-halo | grep -E "^(hostname|port|user|identityfile) "

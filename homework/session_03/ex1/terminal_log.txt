@@ -1,0 +1,448 @@
+################################################################################
+# BÀI 1 - SESSION 03: THAY ĐỔI CỔNG KẾT NỐI SSH (22 -> 2222)
+# Ngày thực hiện : Fri Oct  2 2026 (+0700), khoảng 09:00 - 09:40
+# Máy chủ        : halo (103.116.104.228), Ubuntu 24.04.3 LTS, kernel 6.8.0-87-generic
+# Máy cá nhân    : Windows, Git Bash, IP công cộng 113.161.72.19
+# User thao tác  : devops (uid 1001, nhóm sudo) - không dùng root trực tiếp
+# Quy ước prompt : "devops@halo:~$" = trên máy chủ ; "$" = trên máy cá nhân (Git Bash)
+# Dòng bắt đầu bằng "# " là ghi chú của tôi, không phải output của lệnh.
+################################################################################
+
+
+################################################################################
+# [09:02] TERMINAL 1 (máy cá nhân, Git Bash) - phiên cũ, kết nối qua cổng 22
+################################################################################
+
+$ ssh -i ~/.ssh/id_ed25519_ptit_s02 devops@103.116.104.228
+Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0-87-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+ System information as of Fri Oct  2 09:02:12 +07 2026
+
+  System load:  0.04              Processes:             108
+  Usage of /:   17.9% of 38.70GB  Users logged in:       0
+  Memory usage: 19%               IPv4 address for eth0: 103.116.104.228
+  Swap usage:   0%
+
+Expanded Security Maintenance for Applications is not enabled.
+
+0 updates can be applied immediately.
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
+
+
+Last login: Thu Oct  1 20:47:33 2026 from 113.161.72.19
+devops@halo:~$ date; whoami; id
+Fri Oct  2 09:03:02 +07 2026
+devops
+uid=1001(devops) gid=1001(devops) groups=1001(devops),27(sudo)
+devops@halo:~$ grep PRETTY_NAME /etc/os-release; uname -r; ssh -V
+PRETTY_NAME="Ubuntu 24.04.3 LTS"
+6.8.0-87-generic
+OpenSSH_9.6p1 Ubuntu-3ubuntu13.14, OpenSSL 3.0.13 30 Jan 2024
+devops@halo:~$ echo $SSH_CONNECTION
+113.161.72.19 51406 103.116.104.228 22
+
+
+# ------------------------------------------------------------------------------
+# [09:04] BƯỚC 1 - Lý do đổi cổng: kiểm tra log brute-force trên cổng 22
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ sudo grep "Failed password\|Invalid user" /var/log/auth.log | tail
+[sudo] password for devops:
+2026-10-02T09:03:58.114920+07:00 halo sshd[2611]: Invalid user admin from 185.224.128.17 port 40218
+2026-10-02T09:03:59.882047+07:00 halo sshd[2611]: Failed password for invalid user admin from 185.224.128.17 port 40218 ssh2
+2026-10-02T09:04:07.360518+07:00 halo sshd[2618]: Failed password for root from 45.141.84.213 port 33876 ssh2
+2026-10-02T09:04:12.771203+07:00 halo sshd[2623]: Invalid user ubuntu from 91.92.241.66 port 51320
+2026-10-02T09:04:14.205689+07:00 halo sshd[2623]: Failed password for invalid user ubuntu from 91.92.241.66 port 51320 ssh2
+2026-10-02T09:04:19.640371+07:00 halo sshd[2629]: Invalid user oracle from 178.128.90.14 port 47102
+2026-10-02T09:04:21.018934+07:00 halo sshd[2629]: Failed password for invalid user oracle from 178.128.90.14 port 47102 ssh2
+2026-10-02T09:04:25.493160+07:00 halo sshd[2634]: Failed password for root from 103.145.12.88 port 59644 ssh2
+2026-10-02T09:04:30.927745+07:00 halo sshd[2640]: Invalid user test from 185.224.128.17 port 40390
+2026-10-02T09:04:32.349018+07:00 halo sshd[2640]: Failed password for invalid user test from 185.224.128.17 port 40390 ssh2
+devops@halo:~$ sudo grep -c "Failed password" /var/log/auth.log
+6218
+devops@halo:~$ sudo grep -c "Invalid user" /var/log/auth.log
+3187
+devops@halo:~$ sudo grep "Failed password" /var/log/auth.log | grep -oE "from [0-9]{1,3}(\.[0-9]{1,3}){3}" | sort -u | wc -l
+97
+devops@halo:~$ sudo grep "Failed password" /var/log/auth.log | grep -oE "from [0-9]{1,3}(\.[0-9]{1,3}){3}" | sort | uniq -c | sort -rn | head -5
+   1344 from 185.224.128.17
+    987 from 45.141.84.213
+    802 from 91.92.241.66
+    655 from 178.128.90.14
+    419 from 103.145.12.88
+
+
+# ------------------------------------------------------------------------------
+# [09:06] BƯỚC 2 - Kiểm tra hiện trạng trước khi thay đổi
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ sudo ss -tlnp | grep sshd
+LISTEN 0      4096         0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=1184,fd=3),("systemd",pid=1,fd=71))
+LISTEN 0      4096            [::]:22            [::]:*    users:(("sshd",pid=1184,fd=4),("systemd",pid=1,fd=72))
+devops@halo:~$ sudo sshd -T | grep -i "^port"
+port 22
+devops@halo:~$ sudo grep -rn "Port" /etc/ssh/sshd_config.d/ || echo "(không có chỉ thị Port nào trong drop-in)"
+(không có chỉ thị Port nào trong drop-in)
+devops@halo:~$ sudo ufw status verbose
+Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), disabled (routed)
+New profiles: skip
+
+To                         Action      From
+--                         ------      ----
+22/tcp                     ALLOW IN    Anywhere
+80/tcp                     ALLOW IN    Anywhere
+22/tcp (v6)                ALLOW IN    Anywhere (v6)
+80/tcp (v6)                ALLOW IN    Anywhere (v6)
+
+
+# ------------------------------------------------------------------------------
+# [09:08] Sao lưu file cấu hình
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak-20261002
+devops@halo:~$ ls -l /etc/ssh/sshd_config*
+-rw-r--r-- 1 root root 3266 Sep 25 10:41 /etc/ssh/sshd_config
+-rw-r--r-- 1 root root 3266 Oct  2 09:08 /etc/ssh/sshd_config.bak-20261002
+
+/etc/ssh/sshd_config.d:
+total 0
+
+
+# ------------------------------------------------------------------------------
+# [09:10] BƯỚC 3a - MỞ CỔNG 2222 TRÊN UFW TRƯỚC (chống lockout)
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ sudo ufw allow 2222/tcp
+Rule added
+Rule added (v6)
+devops@halo:~$ sudo ufw status numbered
+Status: active
+
+     To                         Action      From
+     --                         ------      ----
+[ 1] 22/tcp                     ALLOW IN    Anywhere
+[ 2] 80/tcp                     ALLOW IN    Anywhere
+[ 3] 2222/tcp                   ALLOW IN    Anywhere
+[ 4] 22/tcp (v6)                ALLOW IN    Anywhere (v6)
+[ 5] 80/tcp (v6)                ALLOW IN    Anywhere (v6)
+[ 6] 2222/tcp (v6)              ALLOW IN    Anywhere (v6)
+
+
+# ------------------------------------------------------------------------------
+# [09:12] BƯỚC 3b - Sửa Port trong /etc/ssh/sshd_config
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ grep -n "^Port\|^#Port" /etc/ssh/sshd_config
+15:#Port 22
+devops@halo:~$ sudo nano /etc/ssh/sshd_config
+# (trong nano: tìm dòng "#Port 22" bằng Ctrl+W, xóa dấu "#", đổi 22 thành 2222,
+#  lưu bằng Ctrl+O, Enter, thoát bằng Ctrl+X)
+devops@halo:~$ grep -n "^Port\|^#Port" /etc/ssh/sshd_config
+15:Port 2222
+devops@halo:~$ diff /etc/ssh/sshd_config.bak-20261002 /etc/ssh/sshd_config
+15c15
+< #Port 22
+---
+> Port 2222
+devops@halo:~$ ls -l /etc/ssh/sshd_config
+-rw-r--r-- 1 root root 3267 Oct  2 09:13 /etc/ssh/sshd_config
+
+
+# ------------------------------------------------------------------------------
+# [09:14] BƯỚC 3c - Kiểm tra cú pháp trước khi khởi động lại
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ sudo sshd -t
+devops@halo:~$ echo $?
+0
+devops@halo:~$ sudo sshd -T | grep -i "^port"
+port 2222
+
+
+# ------------------------------------------------------------------------------
+# [09:15] Chưa restart: tiến trình đang nghe vẫn là cổng 22 (sửa file chưa có tác dụng)
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ sudo ss -tlnp | grep sshd
+LISTEN 0      4096         0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=1184,fd=3),("systemd",pid=1,fd=71))
+LISTEN 0      4096            [::]:22            [::]:*    users:(("sshd",pid=1184,fd=4),("systemd",pid=1,fd=72))
+
+
+# ------------------------------------------------------------------------------
+# [09:16] BƯỚC 3d - Ubuntu 24.04 dùng systemd socket activation (ssh.socket)
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ sudo systemctl daemon-reload
+devops@halo:~$ sudo systemctl restart ssh.socket
+devops@halo:~$ sudo systemctl restart ssh
+devops@halo:~$ cat /run/systemd/generator/ssh.socket.d/addr.conf
+# Automatically generated by sshd-socket-generator
+
+[Socket]
+ListenStream=
+ListenStream=0.0.0.0:2222
+ListenStream=[::]:2222
+devops@halo:~$ systemctl --no-pager --ascii status ssh.socket
+* ssh.socket - OpenBSD Secure Shell server socket
+     Loaded: loaded (/usr/lib/systemd/system/ssh.socket; enabled; preset: enabled)
+    Drop-In: /run/systemd/generator/ssh.socket.d
+             `-addr.conf
+     Active: active (listening) since Fri 2026-10-02 09:16:41 +07; 11s ago
+   Triggers: * ssh.service
+     Listen: 0.0.0.0:2222 (Stream)
+             [::]:2222 (Stream)
+      Tasks: 0 (limit: 4543)
+     Memory: 8.0K (peak: 512.0K)
+        CPU: 3ms
+     CGroup: /system.slice/ssh.socket
+
+Oct 02 09:16:41 halo systemd[1]: Starting ssh.socket - OpenBSD Secure Shell server socket...
+Oct 02 09:16:41 halo systemd[1]: Listening on ssh.socket - OpenBSD Secure Shell server socket.
+devops@halo:~$ systemctl --no-pager --ascii status ssh
+* ssh.service - OpenBSD Secure Shell server
+     Loaded: loaded (/usr/lib/systemd/system/ssh.service; disabled; preset: enabled)
+     Active: active (running) since Fri 2026-10-02 09:16:44 +07; 25s ago
+TriggeredBy: * ssh.socket
+       Docs: man:sshd(8)
+             man:sshd_config(5)
+    Process: 2925 ExecStartPre=/usr/sbin/sshd -t (code=exited, status=0/SUCCESS)
+   Main PID: 2927 (sshd)
+      Tasks: 2 (limit: 4543)
+     Memory: 2.1M (peak: 2.9M)
+        CPU: 47ms
+     CGroup: /system.slice/ssh.service
+             |-2288 "sshd: devops [priv]"
+             `-2927 "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"
+
+Oct 02 09:16:44 halo systemd[1]: Starting ssh.service - OpenBSD Secure Shell server...
+Oct 02 09:16:44 halo sshd[2927]: Server listening on 0.0.0.0 port 2222.
+Oct 02 09:16:44 halo sshd[2927]: Server listening on :: port 2222.
+Oct 02 09:16:44 halo systemd[1]: Started ssh.service - OpenBSD Secure Shell server.
+devops@halo:~$ sudo ss -tlnp | grep 2222
+LISTEN 0      4096         0.0.0.0:2222       0.0.0.0:*    users:(("sshd",pid=2927,fd=3),("systemd",pid=1,fd=79))
+LISTEN 0      4096            [::]:2222          [::]:*    users:(("sshd",pid=2927,fd=4),("systemd",pid=1,fd=80))
+devops@halo:~$ sudo ss -tlnp | grep -c ':22 '
+0
+
+
+# ------------------------------------------------------------------------------
+# [09:17] Lấy fingerprint host key để đối chiếu khi kết nối lần đầu qua cổng mới
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+256 SHA256:n8Qx3VwK0dRfT7yJbLm2HcAe9uZsPo5GtYiN4XkWq1E root@halo (ED25519)
+
+# TERMINAL 1 GIỮ NGUYÊN, KHÔNG ĐÓNG. Chuyển sang mở một cửa sổ Git Bash MỚI.
+
+
+################################################################################
+# [09:18] TERMINAL 2 (máy cá nhân, Git Bash mới) - kiểm tra kết nối qua cổng 2222
+################################################################################
+
+$ ssh -p 2222 -i ~/.ssh/id_ed25519_ptit_s02 devops@103.116.104.228
+The authenticity of host '[103.116.104.228]:2222 ([103.116.104.228]:2222)' can't be established.
+ED25519 key fingerprint is SHA256:n8Qx3VwK0dRfT7yJbLm2HcAe9uZsPo5GtYiN4XkWq1E.
+This key is not known by any other names.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added '[103.116.104.228]:2222' (ED25519) to the list of known hosts.
+Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0-87-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+ System information as of Fri Oct  2 09:18:37 +07 2026
+
+  System load:  0.03              Processes:             111
+  Usage of /:   17.9% of 38.70GB  Users logged in:       1
+  Memory usage: 19%               IPv4 address for eth0: 103.116.104.228
+  Swap usage:   0%
+
+Expanded Security Maintenance for Applications is not enabled.
+
+0 updates can be applied immediately.
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
+
+
+Last login: Fri Oct  2 09:02:11 2026 from 113.161.72.19
+devops@halo:~$ echo $SSH_CONNECTION
+113.161.72.19 51872 103.116.104.228 2222
+devops@halo:~$ who
+devops   pts/0        2026-10-02 09:02 (113.161.72.19)
+devops   pts/1        2026-10-02 09:18 (113.161.72.19)
+devops@halo:~$ sudo grep "Accepted publickey" /var/log/auth.log | tail -n 2
+[sudo] password for devops:
+2026-10-02T09:02:11.482310+07:00 halo sshd[2288]: Accepted publickey for devops from 113.161.72.19 port 51406 ssh2: ED25519 SHA256:Vb2LxQ8dT5mRjH0wYk7NzAe4cUo1PgS9iFtXn6DuMsE
+2026-10-02T09:18:36.907154+07:00 halo sshd[2958]: Accepted publickey for devops from 113.161.72.19 port 51872 ssh2: ED25519 SHA256:Vb2LxQ8dT5mRjH0wYk7NzAe4cUo1PgS9iFtXn6DuMsE
+
+
+# ------------------------------------------------------------------------------
+# [09:22] BƯỚC 4 - Cổng 2222 đã hoạt động: ĐÓNG cổng 22 trên UFW (thực hiện ở Terminal 2)
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ sudo ufw status numbered
+Status: active
+
+     To                         Action      From
+     --                         ------      ----
+[ 1] 22/tcp                     ALLOW IN    Anywhere
+[ 2] 80/tcp                     ALLOW IN    Anywhere
+[ 3] 2222/tcp                   ALLOW IN    Anywhere
+[ 4] 22/tcp (v6)                ALLOW IN    Anywhere (v6)
+[ 5] 80/tcp (v6)                ALLOW IN    Anywhere (v6)
+[ 6] 2222/tcp (v6)              ALLOW IN    Anywhere (v6)
+devops@halo:~$ sudo ufw delete allow 22/tcp
+Rule deleted
+Rule deleted (v6)
+devops@halo:~$ sudo ufw status numbered
+Status: active
+
+     To                         Action      From
+     --                         ------      ----
+[ 1] 80/tcp                     ALLOW IN    Anywhere
+[ 2] 2222/tcp                   ALLOW IN    Anywhere
+[ 3] 80/tcp (v6)                ALLOW IN    Anywhere (v6)
+[ 4] 2222/tcp (v6)              ALLOW IN    Anywhere (v6)
+devops@halo:~$ sudo ufw status verbose
+Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), disabled (routed)
+New profiles: skip
+
+To                         Action      From
+--                         ------      ----
+80/tcp                     ALLOW IN    Anywhere
+2222/tcp                   ALLOW IN    Anywhere
+80/tcp (v6)                ALLOW IN    Anywhere (v6)
+2222/tcp (v6)              ALLOW IN    Anywhere (v6)
+
+
+################################################################################
+# [09:25] TERMINAL 3 (máy cá nhân, Git Bash) - kiểm tra cổng 22 bị chặn
+################################################################################
+
+$ time ssh -p 22 devops@103.116.104.228
+ssh: connect to host 103.116.104.228 port 22: Connection timed out
+
+real    0m21.142s
+user    0m0.000s
+sys     0m0.015s
+
+
+# ------------------------------------------------------------------------------
+# [09:26] TERMINAL 2 (máy chủ) - UFW đã chặn các gói SYN tới cổng 22 từ máy cá nhân
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ sudo grep "DPT=22 " /var/log/ufw.log | tail -n 3
+2026-10-02T09:25:34.215903+07:00 halo kernel: [359871.204516] [UFW BLOCK] IN=eth0 OUT= MAC=fa:16:3e:5b:2c:91:fa:16:3e:a0:77:d4:08:00 SRC=113.161.72.19 DST=103.116.104.228 LEN=52 TOS=0x00 PREC=0x00 TTL=114 ID=20931 DF PROTO=TCP SPT=51990 DPT=22 WINDOW=64240 RES=0x00 SYN URGP=0
+2026-10-02T09:25:37.224471+07:00 halo kernel: [359874.213012] [UFW BLOCK] IN=eth0 OUT= MAC=fa:16:3e:5b:2c:91:fa:16:3e:a0:77:d4:08:00 SRC=113.161.72.19 DST=103.116.104.228 LEN=52 TOS=0x00 PREC=0x00 TTL=114 ID=20944 DF PROTO=TCP SPT=51990 DPT=22 WINDOW=64240 RES=0x00 SYN URGP=0
+2026-10-02T09:25:43.236098+07:00 halo kernel: [359880.224733] [UFW BLOCK] IN=eth0 OUT= MAC=fa:16:3e:5b:2c:91:fa:16:3e:a0:77:d4:08:00 SRC=113.161.72.19 DST=103.116.104.228 LEN=52 TOS=0x00 PREC=0x00 TTL=114 ID=20987 DF PROTO=TCP SPT=51990 DPT=22 WINDOW=64240 RES=0x00 SYN URGP=0
+
+
+# ------------------------------------------------------------------------------
+# [09:27] TERMINAL 3 (máy cá nhân) - xác thực bằng publickey trên cổng 2222 (ssh -v)
+# ------------------------------------------------------------------------------
+
+$ ssh -v -p 2222 -i ~/.ssh/id_ed25519_ptit_s02 devops@103.116.104.228 exit 2>&1 | grep -E "^OpenSSH|Remote protocol|Server host key|is known and matches|Authentications that can continue|Next authentication method|Offering public key|Server accepts key|^Authenticated to|Sending command|^Transferred"
+OpenSSH_9.8p1, OpenSSL 3.2.2 4 Jun 2024
+debug1: Remote protocol version 2.0, remote software version OpenSSH_9.6p1 Ubuntu-3ubuntu13.14
+debug1: Server host key: ssh-ed25519 SHA256:n8Qx3VwK0dRfT7yJbLm2HcAe9uZsPo5GtYiN4XkWq1E
+debug1: Host '[103.116.104.228]:2222' is known and matches the ED25519 host key.
+debug1: Authentications that can continue: publickey,password
+debug1: Next authentication method: publickey
+debug1: Offering public key: /c/Users/gigabyte/.ssh/id_ed25519_ptit_s02 ED25519 SHA256:Vb2LxQ8dT5mRjH0wYk7NzAe4cUo1PgS9iFtXn6DuMsE explicit agent
+debug1: Server accepts key: /c/Users/gigabyte/.ssh/id_ed25519_ptit_s02 ED25519 SHA256:Vb2LxQ8dT5mRjH0wYk7NzAe4cUo1PgS9iFtXn6DuMsE explicit agent
+Authenticated to 103.116.104.228 ([103.116.104.228]:2222) using "publickey".
+debug1: Sending command: exit
+Transferred: sent 3052, received 2124 bytes, in 0.4 seconds
+
+
+# ------------------------------------------------------------------------------
+# [09:31] BƯỚC 5 - Cấu hình ~/.ssh/config trên máy cá nhân để gõ lệnh ngắn gọn
+# ------------------------------------------------------------------------------
+
+$ cat >> ~/.ssh/config <<'EOF'
+
+Host ptit-halo
+    HostName 103.116.104.228
+    Port 2222
+    User devops
+    IdentityFile ~/.ssh/id_ed25519_ptit_s02
+    IdentitiesOnly yes
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+EOF
+$ chmod 600 ~/.ssh/config
+$ ssh -G ptit-halo | grep -E "^(hostname|port|user|identityfile) "
+hostname 103.116.104.228
+port 2222
+user devops
+identityfile ~/.ssh/id_ed25519_ptit_s02
+$ ssh ptit-halo
+Welcome to Ubuntu 24.04.3 LTS (GNU/Linux 6.8.0-87-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+ System information as of Fri Oct  2 09:32:20 +07 2026
+
+  System load:  0.01              Processes:             113
+  Usage of /:   17.9% of 38.70GB  Users logged in:       2
+  Memory usage: 19%               IPv4 address for eth0: 103.116.104.228
+  Swap usage:   0%
+
+Expanded Security Maintenance for Applications is not enabled.
+
+0 updates can be applied immediately.
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
+
+
+Last login: Fri Oct  2 09:18:36 2026 from 113.161.72.19
+devops@halo:~$ hostname; echo $SSH_CONNECTION
+halo
+113.161.72.19 52077 103.116.104.228 2222
+devops@halo:~$ exit
+logout
+Connection to 103.116.104.228 closed.
+
+
+# ------------------------------------------------------------------------------
+# [09:34] TERMINAL 1 (phiên cũ qua cổng 22) - vẫn sống nhờ kết nối ESTABLISHED; kiểm tra cuối
+# ------------------------------------------------------------------------------
+
+devops@halo:~$ echo $SSH_CONNECTION
+113.161.72.19 51406 103.116.104.228 22
+devops@halo:~$ sudo sshd -T | grep -i "^port"
+[sudo] password for devops:
+port 2222
+devops@halo:~$ sudo ss -tlnp | grep sshd
+LISTEN 0      4096         0.0.0.0:2222       0.0.0.0:*    users:(("sshd",pid=2927,fd=3),("systemd",pid=1,fd=79))
+LISTEN 0      4096            [::]:2222          [::]:*    users:(("sshd",pid=2927,fd=4),("systemd",pid=1,fd=80))
+devops@halo:~$ sudo ufw status verbose
+Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), disabled (routed)
+New profiles: skip
+
+To                         Action      From
+--                         ------      ----
+80/tcp                     ALLOW IN    Anywhere
+2222/tcp                   ALLOW IN    Anywhere
+80/tcp (v6)                ALLOW IN    Anywhere (v6)
+2222/tcp (v6)              ALLOW IN    Anywhere (v6)
+devops@halo:~$ exit
+logout
+Connection to 103.116.104.228 closed.

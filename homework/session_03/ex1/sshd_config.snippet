@@ -1,0 +1,40 @@
+# =============================================================================
+# Đoạn cấu hình liên quan trong /etc/ssh/sshd_config trên máy chủ halo
+# (sau khi sửa ngày 2026-10-02; dòng 15 đổi từ "#Port 22" thành "Port 2222")
+# =============================================================================
+
+# Dòng Include nằm gần đầu file: các tệp drop-in được đọc TRƯỚC, giá trị đọc
+# trước sẽ thắng. Vì vậy phải chắc chắn drop-in không khai báo Port khác.
+Include /etc/ssh/sshd_config.d/*.conf
+
+# Cổng SSH lắng nghe (trước đây là "#Port 22", tức mặc định cổng 22)
+Port 2222
+
+#AddressFamily any
+#ListenAddress 0.0.0.0
+#ListenAddress ::
+
+
+# =============================================================================
+# Phương án B: dùng tệp drop-in thay vì sửa file chính
+#   /etc/ssh/sshd_config.d/10-port.conf   (tạo bằng: sudo nano <đường dẫn>)
+# Nội dung tệp chỉ gồm một dòng:
+#
+#   Port 2222
+#
+# Sau đó kiểm tra bằng: sudo sshd -t && sudo sshd -T | grep -i "^port"
+# Lưu ý: nếu dùng drop-in thì file chính phải để nguyên "#Port 22", không đặt
+# hai giá trị Port khác nhau ở hai nơi.
+# =============================================================================
+
+
+# =============================================================================
+# Tham khảo: tệp do sshd-socket-generator sinh ra sau "systemctl daemon-reload"
+#   /run/systemd/generator/ssh.socket.d/addr.conf
+# (tệp nằm trong /run, không sửa tay; nó được tạo lại từ Port trong sshd_config)
+#
+#   [Socket]
+#   ListenStream=
+#   ListenStream=0.0.0.0:2222
+#   ListenStream=[::]:2222
+# =============================================================================
